@@ -4,7 +4,8 @@
 // from. The other modules own the city, cars, people, police, missions,
 // HUD, sound and particles; this file wires them together.
 
-import { STREETS, LANE, PALETTE, TUNE, SPOTS } from './config.js';
+import { TUNE, SPOTS, LANE_OFF, polar, dirAngle, boulevardX } from './config.js';
+import { pointAt, radialSegmentAt, radialSAt } from './roads.js';
 import { Rng, clamp, angleLerp, angleDiff, dist2d } from './random.js';
 import { Input } from './input.js';
 import { Sfx as Audio } from './audio.js';
@@ -46,7 +47,7 @@ const hud = new Hud();
 
 const traffic = new Traffic(scene, rng, city);
 const parkedCars = spawnParkedCars(scene, rng);
-const comet = spawnCar(scene, 'sport', 0x12b5a5, SPOTS.cometPark.x, SPOTS.cometPark.z, Math.PI);
+const comet = spawnCar(scene, 'sport', 0x12b5a5, SPOTS.cometPark.x, SPOTS.cometPark.z, SPOTS.cometPark.angle);
 comet.mode = 'parked';
 comet.occupied = false;
 parkedCars.push(comet);
@@ -65,7 +66,8 @@ scene.add(beacon);
 
 const player = {
   mesh: makePersonMesh({ shirt: 0x19c2c2, pants: 0x2c3550, skin: 0xf2c79b, hair: 0x2a1c14 }),
-  angle: 2.54,
+  // Spawned a few steps from Rico, already facing him.
+  angle: Math.atan2(SPOTS.rico.x - SPOTS.playerStart.x, SPOTS.rico.z - SPOTS.playerStart.z),
   hp: TUNE.playerMaxHealth,
   phase: 0,
   car: null,
@@ -131,6 +133,7 @@ let elapsed = 0;
 let framesRendered = 0;
 let lastMouseMoveT = -9e9;
 let shotCarAutopilot = false;
+let shotTarget = null;   // scenes: a fixed { x, z } or a function of the car position
 
 addEventListener('mousemove', () => { lastMouseMoveT = performance.now(); });
 addEventListener('resize', () => {
@@ -422,7 +425,19 @@ function updatePlayerDriving(dt) {
     hurtPlayer(preSpeed * 0.55);
   }
   player.mesh.position.copy(car.mesh.position);
-  sfx.engineSet(1, Math.abs(car.speed) / 36);
+  // Engine note follows speed on a curve, with a little throttle blip, so
+  // the car sounds like it is working through gears rather than sliding.
+  const rpmBase = Math.pow(Math.abs(car.speed) / 38, 0.85);
+  const rpm = clamp(0.16 + rpmBase * 0.8 + (throttle > 0 ? 0.05 : 0), 0, 1);
+  sfx.engineSet(1, rpm);
+  // Hard cornering at speed kicks dust off the rear tyres.
+  if (Math.abs(steer) > 0.55 && Math.abs(car.speed) > 16 && framesRendered % 3 === 0) {
+    effects.dust({
+      x: car.mesh.position.x - Math.sin(car.angle) * 1.9,
+      y: 0.4,
+      z: car.mesh.position.z - Math.cos(car.angle) * 1.9,
+    }, 5);
+  }
 }
 
 function hurtPlayer(amount) {
@@ -459,7 +474,7 @@ function onCarCrash(a, b, impact) {
 function updateWorld(dt) {
   const px = facade.playerPos.x;
   const pz = facade.playerPos.z;
-  traffic.update(dt, cars, rng);
+  traffic.update(dt, cars, rng, facade.playerPos);
   // A stolen traffic car should eventually be replaced out of sight.
   peds.update(dt);
   const target = {
@@ -535,12 +550,19 @@ function updateWorld(dt) {
 
 function updateCamera(dt) {
   if (mode === 'menu') {
-    // A slow drift above the east avenue, looking down its corridor toward
-    // the beach and the low sun: open road, flanking towers, sea at the end.
+    // A slow drift above the curved coastal boulevard, looking north-west
+    // across the ring roads to the plaza: the whole non-grid city in one
+    // frame — boulevard curving away below, sea glittering to the right.
     const sway = Math.sin(elapsed * 0.07);
-    camera.position.set(-52 + sway * 4, 10.5 + Math.sin(elapsed * 0.11) * 1.2, -76);
-    camera.lookAt(160, 3, -70);
+    camera.position.set(198 + sway * 3, 14.5 + Math.sin(elapsed * 0.11) * 1.1, 152);
+    camera.lookAt(24, 2, -46);
     return;
+  }
+  // The lens breathes out a little as the car gathers speed.
+  const targetFov = 58 + (player.car ? clamp(Math.abs(player.car.speed) / 41, 0, 1) * 10 : 0);
+  if (Math.abs(camera.fov - targetFov) > 0.05) {
+    camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-dt * 4));
+    camera.updateProjectionMatrix();
   }
   const target = player.car ? player.car.mesh.position : player.mesh.position;
   camYaw -= Input.dragDX * 0.0052;
@@ -562,6 +584,13 @@ function updateCamera(dt) {
   camera.position.y += (height - camera.position.y) * k;
   if (camera.position.y < 1.1) camera.position.y = 1.1;
   const look = { x: target.x, y: 1.7, z: target.z };
+  // Look a little way into the velocity, so fast driving feels forward.
+  const velMag = Math.hypot(player.vel.x, player.vel.z);
+  if (velMag > 2) {
+    const ahead = Math.min(velMag * 0.14, 4.5);
+    look.x += (player.vel.x / velMag) * ahead;
+    look.z += (player.vel.z / velMag) * ahead;
+  }
   if (shake > 0.003) {
     look.x += (Math.random() - 0.5) * shake * 1.4;
     look.y += (Math.random() - 0.5) * shake * 1.1;
@@ -669,6 +698,19 @@ document.getElementById('continuebtn').addEventListener('click', () => beginPlay
 if (!hasSave()) document.getElementById('continuebtn').disabled = true;
 Input.attach(canvas);
 
+// Place the camera exactly where the chase rig would put it, so a scene
+// is framed correctly from the very first frame (headless rendering is
+// slow; the screenshot cannot wait for the camera to fly in).
+function snapShotCamera(anchor) {
+  const dist = camDist + 3.5;
+  camera.position.set(
+    anchor.x + Math.sin(camYaw) * Math.cos(camPitch) * dist,
+    1.6 + Math.sin(camPitch) * dist,
+    anchor.z + Math.cos(camYaw) * Math.cos(camPitch) * dist,
+  );
+  camera.lookAt(anchor.x, 1.7, anchor.z);
+}
+
 // Deterministic screenshot setups: fixed states, no input needed.
 function setupShotScene(name) {
   document.getElementById('startscreen').classList.remove('on');
@@ -681,20 +723,42 @@ function setupShotScene(name) {
     return;
   }
   if (name === 'foot') {
-    // Stand at the open intersection corner south-east of Rico: no palms or
-    // towers crowd the camera line here.
-    teleport(8.5, -144.5);
-    player.angle = Math.atan2(SPOTS.rico.x - 8.5, SPOTS.rico.z + 144.5);
+    // Face to face with Rico in front of the Cafe Vice. The camera axis
+    // runs from the spawn point, but the player steps sideways off that
+    // axis — otherwise he would hide Rico completely — and turns to face
+    // him, so the frame holds both figures and the cafe's sign.
+    const px0 = SPOTS.playerStart.x;
+    const pz0 = SPOTS.playerStart.z;
+    const faceAngle = Math.atan2(SPOTS.rico.x - px0, SPOTS.rico.z - pz0);
+    const px = px0 + Math.cos(faceAngle) * 1.9;
+    const pz = pz0 - Math.sin(faceAngle) * 1.9;
+    teleport(px, pz);
+    player.angle = Math.atan2(SPOTS.rico.x - px, SPOTS.rico.z - pz);
     player.mesh.rotation.y = player.angle;
-    camYaw = player.angle + Math.PI;
+    camYaw = faceAngle + Math.PI;
+    camPitch = 0.3;
+    camDist = 13;
+    snapShotCamera(player.mesh.position);
     missions.talkToRico();
     return;
   }
   if (name === 'drive' || name === 'chase') {
-    const kind = name === 'drive' ? 'sport' : 'sedan';
-    // The drive shot is the Comet run: the player is in the teal Comet itself.
-    const color = name === 'drive' ? 0x12b5a5 : 0x19c2c2;
-    const car = spawnCar(scene, kind, color, -26, LANE, Math.PI / 2);
+    let car;
+    if (name === 'drive') {
+      // The Comet run: posed in the outward lane of the 30° avenue,
+      // driving out toward the Chop Shop and the sea.
+      const seg = radialSegmentAt(30, 74);
+      const p = pointAt(seg, radialSAt(seg, 74));
+      car = spawnCar(scene, 'sport', 0x12b5a5, p.x + p.tz * LANE_OFF, p.z - p.tx * LANE_OFF, dirAngle(30));
+      shotTarget = polar(205, 30);
+    } else {
+      // A three-star chase down the curved coastal boulevard, southbound:
+      // the cover shot — curve, beach, sea and strobing units in frame.
+      const bx = boulevardX(30);
+      car = spawnCar(scene, 'sedan', 0x19c2c2, bx - LANE_OFF, 30, Math.PI);
+      shotTarget = (pos) => ({ x: boulevardX(pos.z - 42) - LANE_OFF, z: pos.z - 42 });
+      camDist = 9;
+    }
     car.mode = 'player';
     car.speed = 17;
     cars.push(car);
@@ -704,26 +768,31 @@ function setupShotScene(name) {
     player.mesh.position.copy(car.mesh.position);
     camYaw = car.angle + Math.PI;
     camPitch = 0.28;
+    snapShotCamera(car.mesh.position);
     shotCarAutopilot = true;
-    // Posed traffic on the same avenue, so the road reads alive in a still.
-    const poseTraffic = (u, dir, kind2, color2) => {
-      const tc = spawnCar(scene, kind2, color2, u, dir > 0 ? LANE : -LANE, dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+    // Posed traffic riding the graph on the same roads, so the stills
+    // read alive: real graph positions, driven by the traffic system.
+    const poseTrafficAt = (angleDeg, r, dir, kind2, color2) => {
+      const seg = radialSegmentAt(angleDeg, r);
+      const s = radialSAt(seg, r);
+      const tc = spawnCar(scene, kind2, color2, 0, 0, 0);
       tc.mode = 'traffic';
-      tc.axis = 'x';
-      tc.street = 0;
-      tc.dir = dir;
-      tc.u = u;
+      tc.path = { seg, s, dir };
       tc.cruise = 11;
       tc.speed = 11;
-      tc.turnCooldown = 99;
       tc.rng = rng;
+      const p = pointAt(seg, s);
+      const tvx = p.tx * dir;
+      const tvz = p.tz * dir;
+      tc.mesh.position.set(p.x + tvz * LANE_OFF, 0, p.z - tvx * LANE_OFF);
+      tc.angle = Math.atan2(tvx, tvz);
       traffic.cars.push(tc);
       cars.push(tc);
     };
     if (name === 'drive') {
-      poseTraffic(38, 1, 'van', 0xf2f2f2);
-      poseTraffic(64, -1, 'taxi', 0xffc21c);
-      poseTraffic(110, 1, 'sedan', 0x53d769);
+      poseTrafficAt(30, 104, 1, 'van', 0xf2f2f2);
+      poseTrafficAt(30, 116, -1, 'taxi', 0xffc21c);
+      poseTrafficAt(30, 142, 1, 'sedan', 0x53d769);
       missions.index = 0;
       missions.stage = 'active';
       missions.sub = 'deliver';
@@ -734,41 +803,64 @@ function setupShotScene(name) {
       missions.stage = 'active';
       missions.sub = 'escape';
       missions.waypoint = null;
-      // Two units cut the player off ahead; a third closes in at the frame's
-      // edge — a chase the camera can actually see.
-      camDist = 9;
+      // Two units cut the player off ahead on the curve; a third closes in
+      // behind, at the camera's edge — a chase the frame can actually see.
+      const bx = boulevardX(30);
       const poses = [
-        { x: 2, z: 10.8, angle: Math.PI + 0.6 },
-        { x: 10, z: -5.2, angle: Math.PI - 0.45 },
-        { x: -34.5, z: -8.5, angle: Math.PI / 2 },
+        { x: bx - 7.5, z: 13, angle: Math.PI + 0.5 },
+        { x: bx + 3.5, z: 4, angle: Math.PI - 0.4 },
+        { x: bx - 2, z: 45, angle: Math.PI },
       ];
       for (const pose of poses) {
         const cop = police.spawnNear(rng, pose.x, pose.z);
         cop.mesh.position.set(pose.x, 0, pose.z);
         cop.angle = pose.angle;
-        cop.speed = 14;
+        cop.speed = 15;
       }
-      poseTraffic(52, -1, 'sedan', 0xff5d7a);
+      // One oncoming car parked in the far lane for depth.
+      const oncoming = spawnCar(scene, 'sedan', 0xff5d7a, boulevardX(-42) + LANE_OFF, -42, 0);
+      oncoming.mode = 'parked';
+      cars.push(oncoming);
     }
   }
 }
 
 if (SHOT_SCENE) setupShotScene(SHOT_SCENE);
 
-// In screenshot scenes the player's car drives itself down the avenue.
+// In screenshot scenes the player's car drives itself toward the scene's
+// target point, looping back to its start stretch before it runs out of
+// road (the police, if any, are shifted along so the chase never ends).
 function shotAutopilot(dt) {
-  if (!shotCarAutopilot || !player.car) return;
+  if (!shotCarAutopilot || !player.car || !shotTarget) return;
   const car = player.car;
-  const steer = clamp(angleDiff(car.angle, Math.PI / 2) * 1.4, -0.7, 0.7);
+  const pos = car.mesh.position;
+  const tp = typeof shotTarget === 'function' ? shotTarget(pos) : shotTarget;
+  const desired = Math.atan2(tp.x - pos.x, tp.z - pos.z);
+  const steer = clamp(angleDiff(car.angle, desired) * 1.4, -0.7, 0.7);
   driveCar(car, 0.82, steer, dt, false);
-  city.collideCircle(car.mesh.position, car.radius);
-  if (car.mesh.position.x > 168) {
-    car.mesh.position.x = -168;
-    for (const cop of police.cars) cop.mesh.position.x -= 300;
+  city.collideCircle(pos, car.radius);
+  if (SHOT_SCENE === 'drive' && Math.hypot(pos.x, pos.z) > 168) {
+    const seg = radialSegmentAt(30, 52);
+    const p = pointAt(seg, radialSAt(seg, 52));
+    const nx = p.x + p.tz * LANE_OFF;
+    const nz = p.z - p.tx * LANE_OFF;
+    const dx = nx - pos.x;
+    const dz = nz - pos.z;
+    pos.x = nx;
+    pos.z = nz;
+    car.angle = dirAngle(30);
+    for (const cop of police.cars) {
+      cop.mesh.position.x += dx;
+      cop.mesh.position.z += dz;
+    }
   }
-  player.mesh.position.copy(car.mesh.position);
+  if (SHOT_SCENE === 'chase' && pos.z < -168) {
+    pos.z += 300;
+    for (const cop of police.cars) cop.mesh.position.z += 300;
+  }
+  player.mesh.position.copy(pos);
   if (SHOT_SCENE === 'chase' && framesRendered % 26 === 0) {
-    effects.sparks({ x: car.mesh.position.x - 3, y: 0.7, z: car.mesh.position.z + 1.4 }, 7);
+    effects.sparks({ x: pos.x - 3, y: 0.7, z: pos.z + 1.4 }, 7);
   }
 }
 
@@ -817,7 +909,7 @@ function frame() {
     if (overlayTimer <= 0) respawn();
   } else if (mode === 'menu') {
     // The menu world idles: traffic rolls, the sea moves, Rico waits.
-    traffic.update(dt, cars, rng);
+    traffic.update(dt, cars, rng, facade.playerPos);
     peds.update(dt);
     rico.update(elapsed, null);
   }

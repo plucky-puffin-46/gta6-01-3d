@@ -4,7 +4,8 @@
 // player, chase, ram, and — when the player is on foot and cornered — fill
 // the busted meter instead of running them down.
 
-import { STREETS, TUNE, PALETTE } from './config.js';
+import { TUNE, PALETTE } from './config.js';
+import { randomRoadPoint } from './roads.js';
 import { clamp, angleDiff } from './random.js';
 import { spawnCar, syncCarMesh } from './vehicles.js';
 
@@ -71,17 +72,16 @@ export class Police {
   }
 
   spawnNear(rng, px, pz) {
-    // Pick a street corner a good way from the player and drive in from it.
-    let x = px;
-    let z = pz;
-    for (let tries = 0; tries < 12; tries++) {
-      const sx = rng.pick(STREETS);
-      const sz = rng.pick(STREETS);
-      x = sx + rng.range(-6, 6);
-      z = sz + rng.range(-6, 6);
-      if (Math.hypot(x - px, z - pz) > 62) break;
+    // Pick a spot on the road network a good way from the player and
+    // drive in from it, already facing the trouble.
+    let pt = randomRoadPoint(rng);
+    for (let tries = 0; tries < 14; tries++) {
+      const d = Math.hypot(pt.x - px, pt.z - pz);
+      if (d > 62 && d < 125) break;
+      pt = randomRoadPoint(rng);
     }
-    const car = spawnCar(this.scene, 'police', PALETTE.police, x, z, rng.range(0, Math.PI * 2));
+    const angle = Math.atan2(px - pt.x, pz - pt.z);
+    const car = spawnCar(this.scene, 'police', PALETTE.police, pt.x, pt.z, angle);
     car.mode = 'police';
     car.cruise = 30;
     this.cars.push(car);
@@ -112,7 +112,14 @@ export class Police {
     for (const c of this.cars) {
       const d = Math.hypot(c.mesh.position.x - px, c.mesh.position.z - pz);
       if (d > 210) {
-        c.mesh.position.set(rng.pick(STREETS) + rng.range(-5, 5), 0, rng.pick(STREETS) + rng.range(-5, 5));
+        let pt = randomRoadPoint(rng);
+        for (let tries = 0; tries < 12; tries++) {
+          const dd = Math.hypot(pt.x - px, pt.z - pz);
+          if (dd > 78 && dd < 135) break;
+          pt = randomRoadPoint(rng);
+        }
+        c.mesh.position.set(pt.x, 0, pt.z);
+        c.angle = Math.atan2(px - pt.x, pz - pt.z);
         c.speed = 12;
       }
     }

@@ -3,7 +3,7 @@
 // The class talks to the rest of the game through the `game` facade the main
 // loop hands it: player position/car, cash, HUD, wanted, sfx and autosave.
 
-import { SPOTS } from './config.js';
+import { SPOTS, ROAM_SPOTS } from './config.js';
 import { dist2d } from './random.js';
 
 const RICO = 'RICO';
@@ -232,11 +232,9 @@ export class Missions {
     if (!this.chainDone) return;
     this.stage = 'roam';
     const g = this.game;
-    const spots = [
-      { x: -152 + 4.4, z: -40 }, { x: 30, z: 152 - 4.4 }, { x: 152 - 4.4, z: 60 },
-      { x: -60, z: -152 + 4.4 }, { x: 224, z: -80 }, { x: 76 + 4.4, z: 120 },
-    ];
-    this.roamTarget = spots[Math.floor(Math.random() * spots.length)];
+    // Free-roam drops live on the new map: boulevard lanes, avenue lanes
+    // and one out on the sand (see ROAM_SPOTS in config.js).
+    this.roamTarget = ROAM_SPOTS[Math.floor(Math.random() * ROAM_SPOTS.length)];
     this.placePickup(this.roamTarget, 0x53d769);
     this.waypoint = { ...this.roamTarget, color: '#53d769' };
   }

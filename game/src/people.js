@@ -1,8 +1,10 @@
 // Puffin Vice 3D — people: a low-poly character built from boxes with
-// swinging arms and legs, the sidewalk crowd that walks, flees and falls,
-// and Rico, the fixer who hands out the story missions.
+// swinging arms and legs, the crowd that walks the road edges of the
+// network (a segment + side + direction each), flees and falls, and Rico,
+// the fixer who hands out the story missions.
 
-import { STREETS, ROAD_HALF, CITY_MIN, CITY_MAX, SPOTS, TUNE } from './config.js';
+import { ROAD_HALF, SPOTS, TUNE } from './config.js';
+import { NETWORK, pointAt, exitNode, randomRoadPoint } from './roads.js';
 import { clamp, angleLerp } from './random.js';
 
 const SKIN = [0xf2c79b, 0xc68863, 0x8a5a3b, 0xffe0bd];
@@ -76,6 +78,72 @@ export function standUp(mesh) {
 
 // --- The crowd -----------------------------------------------------------------
 
+// Where a pedestrian stands: on the road-edge offset of their segment.
+function pedPose(ped) {
+  const p = pointAt(ped.seg, ped.s);
+  const nx = -p.tz;
+  const nz = p.tx;
+  return {
+    x: p.x + nx * ped.side * (ROAD_HALF + 2.0),
+    z: p.z + nz * ped.side * (ROAD_HALF + 2.0),
+    angle: Math.atan2(p.tx * ped.dir, p.tz * ped.dir),
+  };
+}
+
+// The nearest graph position to a world point — how a walker who left
+// their segment (fleeing, knocked down) finds their way back to a kerb.
+function nearestRoadPoint(x, z) {
+  let best = Infinity;
+  let bseg = null;
+  let bs = 0;
+  for (const seg of NETWORK.segments) {
+    for (let i = 1; i < seg.pts.length; i++) {
+      const a = seg.pts[i - 1];
+      const b = seg.pts[i];
+      const abx = b.x - a.x;
+      const abz = b.z - a.z;
+      const l2 = abx * abx + abz * abz;
+      let t = l2 > 0 ? ((x - a.x) * abx + (z - a.z) * abz) / l2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const d = Math.hypot(x - (a.x + abx * t), z - (a.z + abz * t));
+      if (d < best) {
+        best = d;
+        bseg = seg;
+        bs = seg.cum[i - 1] + Math.sqrt(l2) * t;
+      }
+    }
+  }
+  return { seg: bseg, s: bs };
+}
+
+// Crossing a junction: step onto a connected segment, keeping whichever
+// side of the new road is nearer (so nobody teleports across the street).
+// A dead end just turns the walker around.
+function pedCrossJunction(ped) {
+  const exitEnd = ped.dir > 0 ? 1 : 0;
+  const node = exitNode(ped.seg, ped.dir);
+  const options = node.links.filter((l) => !(l.seg === ped.seg && l.end === exitEnd));
+  if (!options.length) {
+    ped.dir = -ped.dir;
+    ped.s = clamp(ped.s, 0, ped.seg.len);
+    return;
+  }
+  const link = options[Math.floor(ped.rng.next() * options.length)];
+  const cur = ped.mesh.position;
+  ped.seg = link.seg;
+  ped.dir = link.end === 0 ? 1 : -1;
+  ped.s = link.end === 0 ? 0 : link.seg.len;
+  let bestSide = ped.side;
+  let bestD = Infinity;
+  for (const side of [1, -1]) {
+    ped.side = side;
+    const pose = pedPose(ped);
+    const d = Math.hypot(pose.x - cur.x, pose.z - cur.z);
+    if (d < bestD) { bestD = d; bestSide = side; }
+  }
+  ped.side = bestSide;
+}
+
 export class Pedestrians {
   constructor(scene, rng, city) {
     this.scene = scene;
@@ -87,21 +155,18 @@ export class Pedestrians {
         hair: rng.pick([0x2a1c14, 0x59452a, 0x111111, 0xb8b0a4]),
       });
       scene.add(mesh);
-      const axis = rng.chance(0.5) ? 'x' : 'z';
-      const street = rng.pick(STREETS);
-      const side = rng.chance(0.5) ? 1 : -1;
+      const pt = randomRoadPoint(rng);
       const ped = {
         mesh, parts: mesh.userData.parts,
-        axis, street, side,
+        seg: pt.seg, s: pt.s,
+        side: rng.chance(0.5) ? 1 : -1,
         dir: rng.chance(0.5) ? 1 : -1,
-        u: rng.range(CITY_MIN + 12, CITY_MAX - 12),
         speed: rng.range(1.6, 2.6),
         phase: rng.range(0, 6),
         state: 'walk',
         hp: 100,
         fleeTime: 0, threatX: 0, threatZ: 0,
         downTime: 0,
-        turnCooldown: rng.range(1, 6),
         rng,
       };
       this.place(ped);
@@ -110,14 +175,9 @@ export class Pedestrians {
   }
 
   place(ped) {
-    const off = ped.side * (ROAD_HALF + 2.1);
-    if (ped.axis === 'z') {
-      ped.mesh.position.set(ped.street + off, 0, ped.u);
-      ped.mesh.rotation.y = ped.dir > 0 ? 0 : Math.PI;
-    } else {
-      ped.mesh.position.set(ped.u, 0, ped.street + off);
-      ped.mesh.rotation.y = ped.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
-    }
+    const pose = pedPose(ped);
+    ped.mesh.position.set(pose.x, 0, pose.z);
+    ped.mesh.rotation.y = pose.angle;
   }
 
   // Something scary happened at (x, z): everyone close runs from it.
@@ -151,6 +211,11 @@ export class Pedestrians {
         if (ped.downTime <= 0) {
           ped.state = 'walk';
           standUp(ped.mesh);
+          // Re-anchor to the nearest kerb so they resume their stroll.
+          const near = nearestRoadPoint(pos.x, pos.z);
+          ped.seg = near.seg;
+          ped.s = near.s;
+          this.place(ped);
         }
         continue;
       }
@@ -163,27 +228,19 @@ export class Pedestrians {
         this.city.collideCircle(pos, 0.7);
         ped.phase += dt * 13;
         animatePerson(ped.parts, ped.phase, 1);
-        if (ped.fleeTime <= 0) ped.state = 'walk';
+        if (ped.fleeTime <= 0) {
+          ped.state = 'walk';
+          // Pick up the stroll again from the nearest kerb.
+          const near = nearestRoadPoint(pos.x, pos.z);
+          ped.seg = near.seg;
+          ped.s = near.s;
+          this.place(ped);
+        }
         continue;
       }
-      // Sidewalk walking: stroll along one street, maybe turn at a corner.
-      ped.turnCooldown -= dt;
-      ped.u += ped.dir * ped.speed * dt;
-      if (ped.u < CITY_MIN - 4) { ped.u = CITY_MIN - 4; ped.dir = 1; }
-      if (ped.u > CITY_MAX + 4) { ped.u = CITY_MAX + 4; ped.dir = -1; }
-      if (ped.turnCooldown <= 0) {
-        for (const cross of STREETS) {
-          if (Math.abs(ped.u - cross) < 1.1 && ped.rng.chance(0.35)) {
-            const along = ped.street + ped.side * (ROAD_HALF + 2.1);
-            ped.axis = ped.axis === 'x' ? 'z' : 'x';
-            ped.street = cross;
-            ped.u = along;
-            ped.dir = ped.rng.chance(0.5) ? 1 : -1;
-            ped.turnCooldown = ped.rng.range(3, 8);
-            break;
-          }
-        }
-      }
+      // Road-edge walking: stroll along one segment, cross at junctions.
+      ped.s += ped.dir * ped.speed * dt;
+      if (ped.s > ped.seg.len || ped.s < 0) pedCrossJunction(ped);
       this.place(ped);
       ped.phase += dt * ped.speed * 2.6;
       animatePerson(ped.parts, ped.phase, 0.8);

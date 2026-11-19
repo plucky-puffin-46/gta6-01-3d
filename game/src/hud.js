@@ -2,7 +2,8 @@
 // stars, the objective banner and dialogue, plus the 2D canvas minimap that
 // mirrors the 3D city (streets, beach, sea, blips and the waypoint).
 
-import { STREETS, ROAD_HALF, BEACH_X, WATER_X } from './config.js';
+import { ROAD_HALF, PLAZA_R, shoreX } from './config.js';
+import { NETWORK } from './roads.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -125,24 +126,53 @@ export class Hud {
     g.clearRect(0, 0, W, H);
     g.fillStyle = '#17352a';
     g.fillRect(0, 0, W, H);
-    // Sea and sand on the east edge.
+    // The curved coast: sand from the shoreline curve to the waterline,
+    // sea beyond it — both follow shoreX(z) down the east edge.
     g.fillStyle = '#c9a86a';
-    g.fillRect(mx(BEACH_X), 0, mx(WATER_X) - mx(BEACH_X), H);
+    g.beginPath();
+    for (let z = -215; z <= 215; z += 10) {
+      const x = mx(shoreX(z) - 38);
+      const y = mz(z);
+      if (z === -215) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    for (let z = 215; z >= -215; z -= 10) g.lineTo(mx(shoreX(z)), mz(z));
+    g.closePath();
+    g.fill();
     g.fillStyle = '#12586e';
-    g.fillRect(mx(WATER_X), 0, W - mx(WATER_X), H);
-    // Streets.
+    g.beginPath();
+    for (let z = -215; z <= 215; z += 10) {
+      const x = mx(shoreX(z));
+      const y = mz(z);
+      if (z === -215) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.lineTo(W, mz(215));
+    g.lineTo(W, mz(-215));
+    g.closePath();
+    g.fill();
+    // The road network itself: rings, radials, diagonals and the curved
+    // boulevard, stroked as the polylines they are.
     g.strokeStyle = '#454b5c';
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
     g.lineWidth = Math.max(2, ROAD_HALF * 2 * s);
-    for (const st of STREETS) {
+    for (const seg of NETWORK.segments) {
       g.beginPath();
-      g.moveTo(mx(st), mz(-196));
-      g.lineTo(mx(st), mz(196));
-      g.stroke();
-      g.beginPath();
-      g.moveTo(mx(-196), mz(st));
-      g.lineTo(mx(286), mz(st));
+      seg.pts.forEach((p, i) => {
+        if (i === 0) g.moveTo(mx(p.x), mz(p.z));
+        else g.lineTo(mx(p.x), mz(p.z));
+      });
       g.stroke();
     }
+    // The plaza disc at the heart of it.
+    g.fillStyle = '#c9a189';
+    g.beginPath();
+    g.arc(mx(0), mz(0), PLAZA_R * s, 0, Math.PI * 2);
+    g.fill();
+    // North marker.
+    g.fillStyle = 'rgba(255,255,255,0.9)';
+    g.font = '700 11px Trebuchet MS, sans-serif';
+    g.textAlign = 'center';
+    g.fillText('N', W / 2, 13);
     // Police blips strobe red/blue like the light bars.
     const copColor = Math.floor(t / 0.16) % 2 === 0 ? '#ff3348' : '#3d7bff';
     for (const c of police) {

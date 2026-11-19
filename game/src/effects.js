@@ -72,6 +72,11 @@ export class Effects {
     this.burst(pos, { count, color: [0.32, 0.32, 0.36], speed: 1.6, up: 3.2, life: 1.15, grav: 2.5 });
   }
 
+  // A low, tan puff that hangs around — dust kicked up by a drifting car.
+  dust(pos, count = 7) {
+    this.burst(pos, { count, color: [0.78, 0.66, 0.48], speed: 2.1, up: 1.1, life: 0.85, grav: 0.7 });
+  }
+
   confetti(pos, count = 18) {
     this.burst(pos, { count, color: [0.45, 1, 0.6], speed: 4, up: 6, life: 0.8, grav: -6 });
   }

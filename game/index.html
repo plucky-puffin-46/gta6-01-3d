@@ -15,7 +15,7 @@
   #hud { position: fixed; inset: 0; pointer-events: none; display: none; }
   #hud.on { display: block; }
   .panel { background: rgba(16, 10, 34, .62); border: 1px solid rgba(255, 170, 220, .35);
-    border-radius: 10px; box-shadow: 0 2px 14px rgba(0,0,0,.35); }
+    border-radius: 14px; box-shadow: 0 2px 14px rgba(0,0,0,.35); }
   #stats { position: absolute; top: 14px; left: 14px; padding: 9px 14px 11px; min-width: 168px; }
   #cash { font-size: 26px; font-weight: 800; color: #7dff9a; letter-spacing: .5px;
     text-shadow: 0 2px 0 rgba(0,0,0,.45); }
@@ -44,8 +44,8 @@
   #dlgtext { font-size: 16.5px; line-height: 1.45; color: #fff; }
   #dlghint { font-size: 11px; color: #aef3ff; margin-top: 5px; letter-spacing: 1px; }
   #minimap { position: absolute; right: 14px; bottom: 14px; width: 192px; height: 192px;
-    border-radius: 12px; border: 1px solid rgba(255,170,220,.4); background: rgba(10,16,30,.8);
-    box-shadow: 0 2px 14px rgba(0,0,0,.4); }
+    border-radius: 50%; border: 2px solid rgba(255,170,220,.55); background: rgba(10,16,30,.8);
+    box-shadow: 0 2px 14px rgba(0,0,0,.4), 0 0 0 4px rgba(16,10,34,.35); }
   #bustedwrap { position: absolute; left: 50%; bottom: 300px; transform: translateX(-50%);
     width: 260px; padding: 8px 12px; display: none; text-align: center; }
   #bustedwrap.on { display: block; }
@@ -67,7 +67,7 @@
   #title { font-size: 74px; font-weight: 900; letter-spacing: 3px; line-height: .95; margin: 0;
     background: linear-gradient(180deg, #ffe259 12%, #ff7518 52%, #ff2e88 88%);
     -webkit-background-clip: text; background-clip: text; color: transparent;
-    filter: drop-shadow(0 4px 0 rgba(43, 6, 66, .85)) drop-shadow(0 10px 26px rgba(255, 46, 136, .35)); }
+    filter: drop-shadow(0 4px 0 rgba(43, 6, 66, .85)) drop-shadow(0 10px 26px rgba(255, 46, 136, .35)) drop-shadow(0 0 42px rgba(255, 117, 24, .35)); }
   #subtitle { margin-top: 6px; font-size: 15px; letter-spacing: 6px; color: #aef3ff; font-weight: 700;
     text-shadow: 0 2px 8px rgba(0,0,0,.7); }
   #blurb { margin: 20px auto 4px; max-width: 560px; font-size: 15.5px; line-height: 1.55; color: #ffeefb;

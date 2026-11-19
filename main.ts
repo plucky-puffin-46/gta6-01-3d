@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
 console.log('Puffin Vice 3D: handing in a third-person open-world crime game — the whole of Vice Palms, Rico\'s three jobs, and every screenshot, as built.');
+console.log('This build\'s Vice Palms is not a grid: seven avenues radiate from a fountain plaza, two ring roads circle it, diagonal avenues cut the blocks, and a curved boulevard follows the beach — traffic, pedestrians and the minimap all run on that one road graph.');
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
