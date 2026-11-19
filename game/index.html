@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Puffin Vice 3D — a tiny open-world crime caper</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1030;
+    font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif; color: #fff;
+    -webkit-user-select: none; user-select: none; }
+  #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; display: none; }
+  #hud.on { display: block; }
+  .panel { background: rgba(16, 10, 34, .62); border: 1px solid rgba(255, 170, 220, .35);
+    border-radius: 10px; box-shadow: 0 2px 14px rgba(0,0,0,.35); }
+  #stats { position: absolute; top: 14px; left: 14px; padding: 9px 14px 11px; min-width: 168px; }
+  #cash { font-size: 26px; font-weight: 800; color: #7dff9a; letter-spacing: .5px;
+    text-shadow: 0 2px 0 rgba(0,0,0,.45); }
+  #healthwrap { margin-top: 5px; height: 11px; background: rgba(255,255,255,.16);
+    border-radius: 6px; overflow: hidden; }
+  #healthbar { height: 100%; width: 100%; background: linear-gradient(90deg, #ff5d7a, #ffb36b);
+    border-radius: 6px; transition: width .18s ease; }
+  #healthlabel { font-size: 10px; letter-spacing: 2px; color: #ffd9ec; margin-top: 3px; }
+  #mode { position: absolute; left: 14px; bottom: 14px; padding: 7px 12px; font-size: 13px;
+    font-weight: 700; letter-spacing: 2px; color: #aef3ff; }
+  #mode b { color: #ffd166; }
+  #stars { position: absolute; top: 14px; right: 14px; padding: 7px 13px; font-size: 25px;
+    letter-spacing: 3px; line-height: 1; }
+  #stars .lit { color: #ffd60a; text-shadow: 0 0 9px rgba(255, 214, 10, .85), 0 2px 0 rgba(0,0,0,.4); }
+  #stars .dim { color: rgba(255,255,255,.22); }
+  #objective { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    max-width: 56%; padding: 9px 20px; font-size: 16.5px; font-weight: 700; text-align: center;
+    color: #ffe9a8; text-shadow: 0 1px 0 rgba(0,0,0,.5); }
+  #objective small { display: block; font-size: 11px; letter-spacing: 2.5px; color: #ff9ed2;
+    font-weight: 800; margin-bottom: 2px; }
+  #timer { color: #ff8fa3; }
+  #dialogue { position: absolute; left: 50%; bottom: 108px; transform: translateX(-50%);
+    width: min(680px, 72%); padding: 12px 18px 13px; display: none; }
+  #dialogue.on { display: block; }
+  #dlgname { font-size: 12px; font-weight: 800; letter-spacing: 2.5px; color: #ff7ac0; margin-bottom: 3px; }
+  #dlgtext { font-size: 16.5px; line-height: 1.45; color: #fff; }
+  #dlghint { font-size: 11px; color: #aef3ff; margin-top: 5px; letter-spacing: 1px; }
+  #minimap { position: absolute; right: 14px; bottom: 14px; width: 192px; height: 192px;
+    border-radius: 12px; border: 1px solid rgba(255,170,220,.4); background: rgba(10,16,30,.8);
+    box-shadow: 0 2px 14px rgba(0,0,0,.4); }
+  #bustedwrap { position: absolute; left: 50%; bottom: 300px; transform: translateX(-50%);
+    width: 260px; padding: 8px 12px; display: none; text-align: center; }
+  #bustedwrap.on { display: block; }
+  #bustedwrap .lbl { font-size: 12px; font-weight: 800; letter-spacing: 3px; color: #ff8fa3; }
+  #bustedbar { height: 9px; margin-top: 5px; background: rgba(255,255,255,.15); border-radius: 5px; overflow: hidden; }
+  #bustedfill { height: 100%; width: 0%; background: #ff3355; }
+  #toast { position: absolute; left: 50%; top: 84px; transform: translateX(-50%); padding: 8px 22px;
+    font-size: 19px; font-weight: 800; color: #7dff9a; opacity: 0; transition: opacity .3s ease;
+    text-shadow: 0 2px 0 rgba(0,0,0,.5); }
+  #toast.show { opacity: 1; }
+  #vignette { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .25s;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(255, 20, 60, .45) 100%); }
+
+  /* ---------- Screens ---------- */
+  .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; text-align: center; z-index: 5; }
+  .screen.on { display: flex; }
+  #startscreen { background: linear-gradient(180deg, rgba(30,8,54,.30) 0%, rgba(30,8,54,.08) 45%, rgba(16,4,32,.55) 100%); }
+  #title { font-size: 74px; font-weight: 900; letter-spacing: 3px; line-height: .95; margin: 0;
+    background: linear-gradient(180deg, #ffe259 12%, #ff7518 52%, #ff2e88 88%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 4px 0 rgba(43, 6, 66, .85)) drop-shadow(0 10px 26px rgba(255, 46, 136, .35)); }
+  #subtitle { margin-top: 6px; font-size: 15px; letter-spacing: 6px; color: #aef3ff; font-weight: 700;
+    text-shadow: 0 2px 8px rgba(0,0,0,.7); }
+  #blurb { margin: 20px auto 4px; max-width: 560px; font-size: 15.5px; line-height: 1.55; color: #ffeefb;
+    text-shadow: 0 1px 6px rgba(0,0,0,.85); padding: 0 18px; }
+  #controls { margin: 12px auto 20px; font-size: 13px; line-height: 1.85; color: #d9f7ff;
+    text-shadow: 0 1px 5px rgba(0,0,0,.9); letter-spacing: .4px; }
+  #controls b { color: #ffd166; font-weight: 800; }
+  .bigbtn { pointer-events: auto; cursor: pointer; border: 0; border-radius: 12px; padding: 14px 42px;
+    font-size: 19px; font-weight: 900; letter-spacing: 2px; color: #fff; margin: 5px;
+    background: linear-gradient(180deg, #ff5da2, #e0218a); box-shadow: 0 6px 0 #8e0f56, 0 12px 26px rgba(0,0,0,.45);
+    font-family: inherit; }
+  .bigbtn:hover { filter: brightness(1.1); }
+  .bigbtn:active { transform: translateY(3px); box-shadow: 0 3px 0 #8e0f56; }
+  .bigbtn.alt { background: linear-gradient(180deg, #39d0d8, #12808f); box-shadow: 0 6px 0 #0a4f59, 0 12px 26px rgba(0,0,0,.45); }
+  .bigbtn:disabled { filter: grayscale(.7) brightness(.7); cursor: default; }
+  #savenote { font-size: 12px; color: #ffd9ec; margin-top: 10px; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+  .banner { font-size: 62px; font-weight: 900; letter-spacing: 8px; margin: 0; }
+  #bustedscreen { background: rgba(10, 10, 40, .45); }
+  #bustedscreen .banner { color: #6db3ff; text-shadow: 0 4px 0 rgba(0,0,40,.8), 0 0 34px rgba(60,120,255,.6); }
+  #wastedscreen { background: rgba(50, 0, 10, .45); }
+  #wastedscreen .banner { color: #ff4455; text-shadow: 0 4px 0 rgba(40,0,0,.8), 0 0 34px rgba(255,40,60,.6); }
+  .screen p.note { font-size: 16px; color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,.9); }
+  #pausescreen, #helpscreen { background: rgba(12, 6, 28, .62); }
+  #pausescreen .banner, #helpscreen .banner { font-size: 44px; color: #ffe259; text-shadow: 0 3px 0 rgba(43,6,66,.9); }
+  #helpbody { font-size: 14.5px; line-height: 2; color: #eafcff; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+  #helpbody b { color: #ffd166; }
+</style>
+</head>
+<body>
+<canvas id="gl" aria-label="Puffin Vice 3D: a third-person open-world crime game"></canvas>
+
+<div id="hud">
+  <div id="stats" class="panel">
+    <div id="cash">$250</div>
+    <div id="healthwrap"><div id="healthbar"></div></div>
+    <div id="healthlabel">HEALTH</div>
+  </div>
+  <div id="mode" class="panel">ON FOOT</div>
+  <div id="stars" class="panel"></div>
+  <div id="objective" class="panel"><small>MISSION</small><span id="objtext">Find Rico</span> <span id="timer"></span></div>
+  <div id="bustedwrap" class="panel"><div class="lbl">BUSTED</div><div id="bustedbar"><div id="bustedfill"></div></div></div>
+  <div id="dialogue" class="panel">
+    <div id="dlgname">RICO</div>
+    <div id="dlgtext"></div>
+    <div id="dlghint">E ▸ next</div>
+  </div>
+  <div id="toast"></div>
+  <canvas id="minimap" width="192" height="192"></canvas>
+</div>
+<div id="vignette"></div>
+
+<div id="startscreen" class="screen on">
+  <h1 id="title">PUFFIN VICE 3D</h1>
+  <div id="subtitle">VICE PALMS &bull; EST. 1986 FOREVER</div>
+  <p id="blurb">You owe money to everyone in Vice Palms. Rico the fixer has work — steal cars,
+    run packages, carry things that are far too hot — if you can drive, shoot, and stay
+    one step ahead of the law.</p>
+  <div id="controls">
+    <b>WASD</b> move &nbsp;<b>Shift</b> sprint &nbsp;<b>Mouse drag</b> camera &nbsp;<b>E</b> enter car / talk<br>
+    <b>F</b> punch / exit car &nbsp;<b>Click</b> shoot &nbsp;<b>K</b> save &nbsp;<b>H</b> help &nbsp;<b>P</b> pause
+  </div>
+  <div>
+    <button id="startbtn" class="bigbtn">START NEW GAME</button>
+    <button id="continuebtn" class="bigbtn alt">CONTINUE</button>
+  </div>
+  <div id="savenote">Progress autosaves after every mission. Press K in game to save manually.</div>
+</div>
+
+<div id="bustedscreen" class="screen">
+  <h1 class="banner">BUSTED</h1>
+  <p class="note" id="bustednote">The Vice Palms PD took you in.</p>
+</div>
+<div id="wastedscreen" class="screen">
+  <h1 class="banner">WASTED</h1>
+  <p class="note" id="wastednote">You woke up at Vice Palms General.</p>
+</div>
+<div id="pausescreen" class="screen">
+  <h1 class="banner">PAUSED</h1>
+  <p class="note">Press P or Esc to keep playing.</p>
+</div>
+<div id="helpscreen" class="screen">
+  <h1 class="banner">HOW TO PLAY</h1>
+  <div id="helpbody">
+    <b>WASD / Arrows</b> — move &amp; drive &nbsp; <b>Shift</b> — sprint / boost<br>
+    <b>Mouse drag</b> — orbit camera &nbsp; <b>Mouse</b> — aim &nbsp; <b>Click</b> — shoot pistol<br>
+    <b>E</b> — enter / exit car, talk, interact &nbsp; <b>F</b> — punch (exit car while driving)<br>
+    <b>K</b> — save game &nbsp; <b>P / Esc</b> — pause &nbsp; <b>H</b> — this help<br>
+    Follow the yellow beacon. Stars mean heat — break line of sight to cool down.
+  </div>
+  <p class="note">Press H or Esc to close.</p>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
